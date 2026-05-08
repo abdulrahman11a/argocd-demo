@@ -1,4 +1,4 @@
-# 🐙 ArgoCD Demo — GitOps with Kubernetes
+#  ArgoCD Demo — GitOps with Kubernetes
 
 A hands-on demo project showcasing **GitOps** continuous delivery using **ArgoCD** on a local Kubernetes cluster (Minikube).
 
