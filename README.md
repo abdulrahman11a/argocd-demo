@@ -7,7 +7,7 @@ A hands-on demo project showcasing **GitOps** continuous delivery using **ArgoCD
 ## 📐 Architecture
 
 
-<img width="5027" height="2620" alt="argo" src="https://github.com/user-attachments/assets/64a9c013-89c7-4be4-8081-59da90b16fec" />
+<img width="1054" height="596" alt="image" src="https://github.com/user-attachments/assets/ed936c7d-b2fd-4197-b5a4-0de103595dec" />
 
 
 
