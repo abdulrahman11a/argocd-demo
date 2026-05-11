@@ -6,3 +6,4 @@ resources:
 
 patches:
   - path: replicas-patch.yaml
+namespace: test
