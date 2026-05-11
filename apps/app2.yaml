@@ -3,13 +3,14 @@ kind: Application
 metadata:
   name: nginx-app-2
   namespace: argocd
+
 spec:
   project: default
 
   source:
     repoURL: https://github.com/abdulrahman11a/argocd-demo.git
     targetRevision: main
-    path: overlays/production 
+    path: overlays/production
 
   destination:
     server: https://kubernetes.default.svc
@@ -19,3 +20,6 @@ spec:
     automated:
       prune: true
       selfHeal: true
+
+    syncOptions:
+      - CreateNamespace=true
