@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: nginx-app-2
+  name: nginx-production-app
   namespace: argocd
 
 spec:
@@ -20,6 +20,16 @@ spec:
     automated:
       prune: true
       selfHeal: true
+
+    # Retry configuration for failed sync operations
+    # limit: maximum number of retry attempts
+    # backoff: controls delay between retries (exponential backoff strategy)
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 2m
 
     syncOptions:
       - CreateNamespace=true
