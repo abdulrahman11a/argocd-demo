@@ -1,12 +1,11 @@
-<img src="https://argo-cd.readthedocs.io/en/stable/assets/logo.png" width="80px" />
-
-# argocd-demo
-
-> **GitOps platform built with Argo CD · Kubernetes · Terraform · Helm**
-> Git is the single source of truth — never touch the cluster directly.
+<div align="center">
+  <img src="https://argo-cd.readthedocs.io/en/stable/assets/logo.png" width="80px" />
+  <h1>argocd-demo</h1>
+  <p><strong>GitOps platform built with Argo CD · Kubernetes · Terraform · Helm</strong><br>
+  Git is the single source of truth — never touch the cluster directly.</p>
+</div>
 
 ---
-
 
 ## Table of Contents
 
