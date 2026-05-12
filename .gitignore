@@ -1,0 +1,24 @@
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+.terraform.lock.hcl
+terraform/environments/*.tfvars
+
+# Secrets — NEVER commit these
+**/secrets/
+*.secret
+*.key
+*.pem
+kubeconfig
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
