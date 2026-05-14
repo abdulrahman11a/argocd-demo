@@ -1,25 +1,319 @@
 apiVersion: v1
 kind: Service
+
 metadata:
   name: currency-converter-svc
   namespace: production
+
   labels:
+    # Main application name
     app.kubernetes.io/name: currency-converter
+
+    # Managed through ArgoCD GitOps
     app.kubernetes.io/managed-by: argocd
+
+    # Environment identifier
     environment: production
+
   annotations:
+    # Sync after Deployment
+    #
+    # Typical order:
+    #
+    # 0 -> ServiceAccount
+    # 1 -> ConfigMap / Secret
+    # 2 -> Deployment
+    # 3 -> Service / Ingress
+    #
+    # Ensures pods already exist before
+    # traffic routing starts.
     argocd.argoproj.io/sync-wave: "3"
+
 spec:
+
+  # ============================================================
+  # SERVICE TYPE
+  # ============================================================
+  #
+  # ClusterIP:
+  #
+  # Internal Kubernetes service only.
+  #
+  # Accessible FROM INSIDE cluster:
+  #
+  #   other pods
+  #   ingress controller
+  #   jobs
+  #   internal services
+  #
+  # NOT directly accessible from internet.
+  #
+  # In production:
+  #
+  # Internet
+  #    ↓
+  # Ingress
+  #    ↓
+  # Service (ClusterIP)
+  #    ↓
+  # Pods
+  #
+  # This is the standard production architecture.
+  #
   type: ClusterIP
+
+  # ============================================================
+  # SELECTOR
+  # ============================================================
+  #
+  # Service dynamically finds pods
+  # having this label:
+  #
+  #   app.kubernetes.io/name=currency-converter
+  #
+  # The Deployment creates pods with this label.
+  #
+  # Therefore:
+  #
+  # Service automatically routes traffic
+  # to matching pods.
+  #
+  # Example:
+  #
+  # Pod A -> matched
+  # Pod B -> matched
+  # Pod C -> matched
+  #
+  # If pod crashes:
+  # Kubernetes removes it automatically
+  # from service endpoints.
+  #
   selector:
     app.kubernetes.io/name: currency-converter
+
+  # ============================================================
+  # PORT MAPPING
+  # ============================================================
+  #
+  # Service acts like an internal load balancer.
+  #
+  # Client connects to:
+  #
+  #   Service Port
+  #
+  # Then Kubernetes forwards traffic to:
+  #
+  #   Pod TargetPort
+  #
+  # ------------------------------------------------------------
+  # HTTP TRAFFIC
+  # ------------------------------------------------------------
+  #
+  # External/Internal callers use:
+  #
+  #   port 80
+  #
+  # Service forwards traffic to:
+  #
+  #   targetPort: http
+  #
+  # "http" refers to container port name
+  # defined in Deployment:
+  #
+  # ports:
+  #   - name: http
+  #     containerPort: 5000
+  #
+  # Final traffic flow:
+  #
+  # Service:80
+  #      ↓
+  # Pod:5000
+  #
+  # ------------------------------------------------------------
+  # METRICS TRAFFIC
+  # ------------------------------------------------------------
+  #
+  # Metrics endpoint exposed internally.
+  #
+  # Usually scraped by:
+  #
+  #   Prometheus
+  #
+  # Flow:
+  #
+  # Service:9090
+  #      ↓
+  # Pod:9090
+  #
   ports:
+
     - name: http
+
+      # Service port
       port: 80
+
+      # Container target port name
       targetPort: http
+
       protocol: TCP
+
     - name: metrics
+
       port: 9090
+
       targetPort: metrics
+
       protocol: TCP
+
+  # ============================================================
+  # SESSION AFFINITY
+  # ============================================================
+  #
+  # None:
+  #
+  # Requests distributed normally
+  # across all healthy pods.
+  #
+  # Example:
+  #
+  # Request 1 -> Pod A
+  # Request 2 -> Pod B
+  # Request 3 -> Pod C
+  #
+  # Better for:
+  #
+  # - load balancing
+  # - scalability
+  # - stateless APIs
+  #
+  # If set to:
+  #
+  #   ClientIP
+  #
+  # Same client keeps hitting same pod.
+  #
+  # Usually needed for:
+  #
+  # - legacy sessions
+  # - sticky sessions
+  #
+  # Modern APIs usually avoid this.
+  #
   sessionAffinity: None
+
+
+# ==============================================================
+# IMPORTANT PRODUCTION NOTES
+# ==============================================================
+#
+# THIS SERVICE DOES NOT CREATE PODS.
+#
+# Deployment creates pods.
+#
+# Service ONLY provides:
+#
+# - stable networking
+# - service discovery
+# - load balancing
+#
+# --------------------------------------------------------------
+# WHY SERVICE IS REQUIRED
+# --------------------------------------------------------------
+#
+# Pods are ephemeral:
+#
+# - pod IPs change
+# - pods restart
+# - pods scale up/down
+#
+# Without Service:
+#
+# applications would constantly lose connectivity.
+#
+# Service provides stable DNS:
+#
+#   currency-converter-svc.production.svc.cluster.local
+#
+# Internal components connect using this DNS.
+#
+# Example:
+#
+# smoke-test job
+#       ↓
+# service DNS
+#       ↓
+# service load balancing
+#       ↓
+# healthy pods
+#
+# --------------------------------------------------------------
+# WHY ClusterIP INSTEAD OF NodePort
+# --------------------------------------------------------------
+#
+# ClusterIP is preferred for production because:
+#
+# - internal only
+# - safer
+# - cleaner networking
+# - ingress handles external traffic
+#
+# Standard production flow:
+#
+# User
+#   ↓
+# Ingress Controller
+#   ↓
+# Service (ClusterIP)
+#   ↓
+# Pods
+#
+# NodePort exposes nodes directly and is usually:
+#
+# - development
+# - testing
+# - small labs
+#
+# In production:
+# Ingress is preferred.
+#
+# --------------------------------------------------------------
+# SERVICE IS A LOAD BALANCER
+# --------------------------------------------------------------
+#
+# If Deployment replicas = 3:
+#
+# Pod A
+# Pod B
+# Pod C
+#
+# Service distributes traffic automatically.
+#
+# If Pod B crashes:
+#
+# Kubernetes removes it from endpoints.
+#
+# Traffic automatically continues:
+#
+# Pod A
+# Pod C
+#
+# No manual intervention needed.
+#
+# --------------------------------------------------------------
+# IMPORTANT DESIGN PRINCIPLE
+# --------------------------------------------------------------
+#
+# Deployment responsibility:
+#
+#   compute lifecycle
+#
+# Service responsibility:
+#
+#   stable networking + traffic routing
+#
+# In Kubernetes:
+#
+# compute and networking are separated intentionally.
+#
+# ==============================================================

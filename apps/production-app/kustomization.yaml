@@ -1,24 +1,63 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+# --------------------------------------------------------
+# GLOBAL NAMESPACE
+# All resources defined below will be deployed here
+# --------------------------------------------------------
 namespace: production
 
+# --------------------------------------------------------
+# LIST OF KUBERNETES RESOURCES
+# These are the base manifests that form the full system
+# --------------------------------------------------------
 resources:
+  # Namespace definition (isolates environment)
   - namespace.yaml
+
+  # ServiceAccount for secure pod identity
   - serviceaccount.yaml
+
+  # Application configuration (env variables)
   - configmap.yaml
+
+  # Main application deployment (Pods)
   - deployment.yaml
+
+  # Internal networking (service discovery + load balancing)
   - service.yaml
+
+  # External access entry point (Ingress / DNS routing)
   - ingress.yaml
+
+  # Pre-deployment DB migration job (runs before app starts)
   - presync-db-migration-job.yaml
+
+  # Post-deployment smoke tests (validates system health)
   - postsync-smoke-test.yaml
+
+  # Failure handler (alerts + rollback instructions)
   - syncfail-job.yaml
 
+# --------------------------------------------------------
+# COMMON LABELS
+# Automatically applied to ALL resources above
+# --------------------------------------------------------
 commonLabels:
+  # Logical grouping: identifies all resources as part of same system
   app.kubernetes.io/part-of: currency-converter
+
+  # Indicates GitOps management via ArgoCD
   app.kubernetes.io/managed-by: argocd
+
+  # Environment tag for filtering (prod / staging / dev)
   environment: production
 
+# --------------------------------------------------------
+# IMAGE OVERRIDE
+# Used to dynamically change container image version
+# --------------------------------------------------------
 images:
   - name: abdulrahman11a/currency-converter
+    # This tag is replaced during CI/CD pipeline (GitOps versioning)
     newTag: "IMAGE_TAG"

@@ -97,3 +97,59 @@ spec:
             limits:
               cpu: "100m"
               memory: "64Mi"
+# -------------------------------------------------------------------
+# INIT CONTAINER VS MAIN CONTAINER EXPLANATION
+# -------------------------------------------------------------------
+#
+# This Job uses an initContainer to ensure proper separation of concerns:
+#
+# 1. initContainer (wait-for-deployment):
+#    - Runs BEFORE the main container starts.
+#    - Its ONLY responsibility is to wait until the target deployment
+#      (currency-converter) becomes fully ready.
+#    - It blocks the execution of the main container until the application
+#      is healthy and fully rolled out.
+#
+# 2. main container (smoke-test):
+#    - Runs ONLY after the initContainer succeeds.
+#    - Responsible for executing all smoke tests against the running service.
+#
+# -------------------------------------------------------------------
+# WHY NOT USE A SINGLE CONTAINER?
+# -------------------------------------------------------------------
+#
+# It is technically possible to combine both steps (wait + tests) inside
+# a single container script, and it would still work.
+#
+# However, we intentionally separate them because:
+#
+# - Clear separation of concerns:
+#   wait logic (dependency check) is isolated from test logic (validation).
+#
+# - Better failure visibility:
+#   If the deployment is not ready, the initContainer fails immediately,
+#   making it clear that the issue is with readiness, not application logic.
+#
+# - Better lifecycle control:
+#   initContainer MUST succeed before the main container starts,
+#   enforcing a strict execution order.
+#
+# - Cleaner debugging and observability in production environments.
+#
+# -------------------------------------------------------------------
+# WHEN A SINGLE CONTAINER WOULD BE ACCEPTABLE:
+# -------------------------------------------------------------------
+#
+# - Small or local development environments.
+# - Simple scripts or temporary testing jobs.
+# - Non-production workloads where observability and structure are not critical.
+#
+# -------------------------------------------------------------------
+# PRODUCTION RECOMMENDATION:
+# -------------------------------------------------------------------
+#
+# In production-grade Kubernetes systems, using initContainers is preferred
+# to enforce deterministic startup order, improve reliability, and separate
+# infrastructure readiness checks from application validation logic.
+#
+# -------------------------------------------------------------------

@@ -1,28 +1,85 @@
 apiVersion: v1
 kind: ConfigMap
+
 metadata:
+  # Name of the ConfigMap used by the application
   name: currency-converter-config
+
+  # Namespace where the application runs
   namespace: production
+
   labels:
+    # Application identity label
     app.kubernetes.io/name: currency-converter
+
+    # Indicates resource is managed by ArgoCD (GitOps)
     app.kubernetes.io/managed-by: argocd
+
+    # Environment classification
     environment: production
+
   annotations:
+    # Ensures ConfigMap is created early in ArgoCD sync order
     argocd.argoproj.io/sync-wave: "1"
+
 data:
+  # --------------------------------------------------------
+  # APPLICATION CONFIGURATION
+  # --------------------------------------------------------
+
+  # Runtime environment of the application
   APP_ENV: "production"
+
+  # Port where the .NET API listens inside the container
   APP_PORT: "5000"
+
+  # Logging configuration
   LOG_LEVEL: "info"
   LOG_FORMAT: "json"
+
+  # --------------------------------------------------------
+  # DATABASE CONFIGURATION
+  # --------------------------------------------------------
+
+  # PostgreSQL service DNS inside Kubernetes cluster
   DB_HOST: "postgres-svc.production.svc.cluster.local"
   DB_PORT: "5432"
   DB_NAME: "currency_db"
+
+  # --------------------------------------------------------
+  # REDIS CACHE CONFIGURATION
+  # --------------------------------------------------------
+
+  # Redis service DNS inside cluster
   REDIS_HOST: "redis-svc.production.svc.cluster.local"
   REDIS_PORT: "6379"
+
+  # Time To Live (TTL) for cached data in seconds
+  # Example: 300s = cached exchange rates expire after 5 minutes
   CACHE_TTL_SECONDS: "300"
+
+  # --------------------------------------------------------
+  # EXTERNAL API CONFIGURATION
+  # --------------------------------------------------------
+
+  # External exchange rate API endpoint
   API_BASE_URL: "https://api.exchangerate.host"
+
+  # Timeout for external API calls (seconds)
   API_TIMEOUT_SECONDS: "10"
+
+  # Number of retries for failed external API calls
   MAX_RETRIES: "3"
+
+  # --------------------------------------------------------
+  # MONITORING & HEALTH CHECKS
+  # --------------------------------------------------------
+
+  # Prometheus metrics endpoint port
   METRICS_PORT: "9090"
+
+  # Health check endpoint used by Kubernetes liveness probe
   HEALTH_CHECK_PATH: "/healthz"
+
+  # Readiness check endpoint used by Kubernetes readiness probe
   READINESS_CHECK_PATH: "/readyz"

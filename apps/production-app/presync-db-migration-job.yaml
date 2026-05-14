@@ -1,107 +1,366 @@
 apiVersion: batch/v1
 kind: Job
+
 metadata:
   name: db-migration
   namespace: production
+
   labels:
     app.kubernetes.io/name: currency-converter
     app.kubernetes.io/component: migration
     app.kubernetes.io/managed-by: argocd
     environment: production
+
   annotations:
+    # Run BEFORE Deployment/Service/Ingress
     argocd.argoproj.io/hook: PreSync
+
+    # Delete old hook job before creating a new one
+    # Prevents:
+    # - old failed jobs blocking sync
+    # - duplicated job names
+    # - stale migration history
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+
 spec:
+  # Retry once only
+  # If migration fails repeatedly we stop deployment immediately
   backoffLimit: 1
+
+  # Auto delete completed job after 5 min
+  # Keeps cluster clean from old migration jobs
   ttlSecondsAfterFinished: 300
+
+  # Kill the job if it hangs >10 min
+  # Prevents stuck sync operations
   activeDeadlineSeconds: 600
+
   template:
     metadata:
       labels:
         app.kubernetes.io/name: currency-converter
         app.kubernetes.io/component: migration
+
     spec:
       restartPolicy: Never
+
+      # Dedicated service account
+      # Principle of least privilege
       serviceAccountName: currency-converter-sa
+
+      # =========================================================
+      # INIT CONTAINER
+      # =========================================================
+      # Purpose:
+      # Wait until database becomes reachable BEFORE
+      # starting schema migrations.
+      #
+      # Why important?
+      # Without this:
+      # - migration may fail because DB pod still starting
+      # - DNS may not be ready yet
+      # - ArgoCD sync fails unnecessarily
+      #
+      # initContainer runs FIRST and MUST succeed.
+      # Main container will NOT start before init finishes.
+      # =========================================================
+
       initContainers:
+
         - name: wait-for-db
           image: busybox:1.36
-          command:
-            - sh
-            - -c
-            - |
-              echo "Waiting for database..."
-              until nc -z $DB_HOST $DB_PORT; do
-                echo "DB not ready — retrying in 5s..."
-                sleep 5
-              done
-              echo "Database is ready!"
-          env:
-            - name: DB_HOST
-              valueFrom:
-                configMapKeyRef:
-                  name: currency-converter-config
-                  key: DB_HOST
-            - name: DB_PORT
-              valueFrom:
-                configMapKeyRef:
-                  name: currency-converter-config
-                  key: DB_PORT
-          resources:
-            requests:
-              cpu: "10m"
-              memory: "16Mi"
-            limits:
-              cpu: "50m"
-              memory: "32Mi"
-      containers:
-        - name: migration
-          image: abdulrahman11a/currency-converter:IMAGE_TAG
-          imagePullPolicy: Always
+
           command:
             - sh
             - -c
             - |
               set -e
-              echo "=============================="
-              echo " DB Migration Starting"
+
+              echo "=================================="
+              echo " Waiting for database connection"
+              echo "=================================="
+
+              until nc -z "$DB_HOST" "$DB_PORT"; do
+                echo "Database is not ready yet..."
+                sleep 5
+              done
+
+              echo "Database connection established."
+
+          # Import all ConfigMap variables:
+          # DB_HOST
+          # DB_PORT
+          # DB_NAME
+          # etc...
+          envFrom:
+            - configMapRef:
+                name: currency-converter-config
+
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "16Mi"
+
+            limits:
+              cpu: "50m"
+              memory: "32Mi"
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+
+            capabilities:
+              drop:
+                - ALL
+
+      # =========================================================
+      # MAIN MIGRATION CONTAINER
+      # =========================================================
+      #
+      # This container performs the ACTUAL database migration.
+      #
+      # FLOW:
+      #
+      # 1. DB becomes reachable
+      # 2. Migration job starts
+      # 3. Apply pending schema changes
+      # 4. Validate migration consistency
+      # 5. If successful -> ArgoCD deploys application
+      # 6. If failed -> deployment stops completely
+      #
+      # =========================================================
+
+      containers:
+
+        - name: migration
+
+          image: abdulrahman11a/currency-converter:IMAGE_TAG
+          imagePullPolicy: Always
+
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+
+              echo "=================================="
+              echo " Database Migration Started"
               echo " Time: $(date -u)"
-              echo "=============================="
+              echo "=================================="
+
+              # ---------------------------------------------------
+              # Apply pending migrations
+              #
+              # Example:
+              # - add column
+              # - create table
+              # - alter schema
+              #
+              # If this step fails:
+              # -> ArgoCD stops deployment
+              # -> Old application keeps running
+              # -> Prevents app/schema mismatch
+              # ---------------------------------------------------
               python manage.py migrate --no-input
+
+              # ---------------------------------------------------
+              # Validate migration state
+              #
+              # Ensures:
+              # - all migrations applied
+              # - migration history consistent
+              # - schema matches expected state
+              #
+              # IMPORTANT:
+              # This DOES NOT validate business correctness.
+              #
+              # Example:
+              # Schema may succeed BUT data can still be wrong.
+              #
+              # Example dangerous migration:
+              #
+              # UPDATE products SET price = price / 100;
+              #
+              # Migration succeeds technically,
+              # but may corrupt business data logically.
+              #
+              # Therefore:
+              # migration success != data correctness
+              # ---------------------------------------------------
               python manage.py migrate --check
-              echo "Migration completed successfully!"
+
+              echo "=================================="
+              echo " Migration completed successfully!"
+              echo "=================================="
+
+          # Import shared environment variables
+          envFrom:
+            - configMapRef:
+                name: currency-converter-config
+
           env:
-            - name: DB_HOST
-              valueFrom:
-                configMapKeyRef:
-                  name: currency-converter-config
-                  key: DB_HOST
-            - name: DB_PORT
-              valueFrom:
-                configMapKeyRef:
-                  name: currency-converter-config
-                  key: DB_PORT
-            - name: DB_NAME
-              valueFrom:
-                configMapKeyRef:
-                  name: currency-converter-config
-                  key: DB_NAME
+            # Sensitive values stored in Secret
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: currency-converter-secret
                   key: db-password
+
           resources:
             requests:
               cpu: "100m"
               memory: "128Mi"
+
             limits:
               cpu: "300m"
               memory: "256Mi"
+
           securityContext:
+            # Prevent privilege escalation
             allowPrivilegeEscalation: false
+
+            # Prevent writing to container filesystem
+            # Reduces attack surface
+            readOnlyRootFilesystem: true
+
+            # Do NOT run as root
             runAsNonRoot: true
+
+            # Linux user inside container
             runAsUser: 1000
+
             capabilities:
               drop:
                 - ALL
+
+# ==============================================================
+# IMPORTANT PRODUCTION NOTES
+# ==============================================================
+#
+# THIS JOB HELPS HANDLE 3 IMPORTANT DEPLOYMENT CASES:
+#
+# --------------------------------------------------------------
+# CASE 1 — Migration NOT executed yet
+# --------------------------------------------------------------
+#
+# Scenario:
+# Developer pushes bad migration commit.
+#
+# Since this job runs as PreSync:
+# - migration executes BEFORE app deployment
+# - if migration fails:
+#     -> deployment stops immediately
+#     -> old application keeps serving traffic
+#
+# RESULT:
+# Safe rollback possible using:
+#
+#   git revert
+#
+# or:
+#
+#   argocd app rollback
+#
+# --------------------------------------------------------------
+# CASE 2 — Schema migration fails
+# --------------------------------------------------------------
+#
+# Example:
+# - invalid SQL
+# - missing dependency
+# - incompatible schema change
+#
+# Result:
+# - migration container exits with error
+# - ArgoCD sync fails
+# - new application version NEVER starts
+#
+# This prevents:
+#
+#   new code + old schema mismatch
+#
+# Example prevented error:
+#
+#   Invalid column name 'PhoneNumber'
+#
+# --------------------------------------------------------------
+# CASE 3 — Data corruption (NOT fully handled)
+# --------------------------------------------------------------
+#
+# IMPORTANT:
+# This job validates schema consistency ONLY.
+#
+# It CANNOT detect logical business corruption.
+#
+# Dangerous example:
+#
+#   UPDATE products SET price = price / 100;
+#
+# Technically:
+# - migration succeeds
+# - schema valid
+#
+# BUT:
+# - business data becomes incorrect
+#
+# Therefore:
+#
+#   migration success != business correctness
+#
+# Real production systems additionally require:
+#
+# - DB backups
+# - snapshots
+# - point-in-time recovery
+# - smoke tests
+# - business validation checks
+#
+# --------------------------------------------------------------
+# WHY PRE-SYNC MIGRATIONS ARE CRITICAL
+# --------------------------------------------------------------
+#
+# WRONG FLOW:
+#
+#   deploy app first
+#   -> new code starts
+#   -> old DB schema still exists
+#   -> runtime crashes
+#
+# SAFE FLOW:
+#
+#   run migration first
+#   -> validate schema
+#   -> deploy app
+#
+# This prevents production outages during rolling deployments.
+#
+# --------------------------------------------------------------
+# BEST PRACTICE
+# --------------------------------------------------------------
+#
+# Database changes should be:
+#
+#   backward-compatible
+#
+# During rolling deployments:
+# - old pods
+# - new pods
+#
+# may run simultaneously.
+#
+# Avoid:
+# - dropping columns immediately
+# - destructive schema changes
+#
+# Prefer:
+# - add new column first
+# - deploy compatible app
+# - migrate traffic gradually
+# - remove old schema later
+#
+# Pattern name:
+#
+#   Expand -> Migrate -> Contract
+#
+# ==============================================================

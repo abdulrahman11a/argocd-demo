@@ -1,41 +1,82 @@
 apiVersion: batch/v1
 kind: Job
+
 metadata:
+  # Job name used to handle ArgoCD Sync Failure events
   name: syncfail-rollback-notify
+
+  # Namespace where this job runs
   namespace: production
+
   labels:
+    # Application identity
     app.kubernetes.io/name: currency-converter
+
+    # Logical component: handles sync failure notifications
     app.kubernetes.io/component: syncfail-handler
+
+    # Managed by ArgoCD (GitOps controller)
     app.kubernetes.io/managed-by: argocd
+
+    # Environment classification
     environment: production
+
   annotations:
+    # This job is triggered ONLY when ArgoCD sync fails
     argocd.argoproj.io/hook: SyncFail
+
+    # Ensure old hook jobs are removed before creating a new one
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+
 spec:
+  # Do not retry the job if it fails (fail fast behavior)
   backoffLimit: 0
+
+  # Automatically delete completed job after 10 minutes
   ttlSecondsAfterFinished: 600
+
+  # Maximum execution time allowed for the job (2 minutes)
   activeDeadlineSeconds: 120
+
   template:
     metadata:
       labels:
+        # Identifies the application this job belongs to
         app.kubernetes.io/name: currency-converter
+
+        # Component type for observability and filtering
         app.kubernetes.io/component: syncfail-handler
+
     spec:
+      # Job must complete and never restart automatically
       restartPolicy: Never
+
+      # Use shared service account (controlled permissions)
       serviceAccountName: currency-converter-sa
+
       containers:
         - name: rollback-notify
+
+          # Lightweight image used for HTTP requests (Slack webhook)
           image: curlimages/curl:8.5.0
+
           command:
             - sh
             - -c
             - |
               set -e
+
+              # Capture UTC timestamp for incident tracking
               TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
               echo "=============================="
               echo " SYNC FAILED — $TIMESTAMP"
               echo "=============================="
+
+              # Only send Slack notification if webhook exists
               if [ -n "$SLACK_WEBHOOK_URL" ]; then
+
+                # Send structured Slack alert with failure details
                 curl -s -X POST "$SLACK_WEBHOOK_URL" \
                   -H "Content-Type: application/json" \
                   -d "{
@@ -51,21 +92,30 @@ spec:
                       \"text\": \"<https://argocd.example.com/applications/currency-converter-production|Open in Argo CD>\"
                     }]
                   }"
+
                 echo "Slack alert sent."
               fi
+
+              # Manual recovery instructions for DevOps engineers
               echo "NEXT STEPS:"
               echo "  argocd app rollback currency-converter-production"
               echo "  OR: git revert HEAD && git push"
+
           env:
+            # Slack webhook URL stored securely in Kubernetes Secret
             - name: SLACK_WEBHOOK_URL
               valueFrom:
                 secretKeyRef:
                   name: currency-converter-secret
                   key: slack-webhook-url
+
           resources:
+            # Minimal CPU usage since job is lightweight (curl only)
             requests:
               cpu: "10m"
               memory: "16Mi"
+
+            # Hard limits to prevent resource abuse
             limits:
               cpu: "50m"
               memory: "32Mi"
