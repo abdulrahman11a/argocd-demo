@@ -1,0 +1,99 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: smoke-test
+  namespace: production
+  labels:
+    app.kubernetes.io/name: currency-converter
+    app.kubernetes.io/component: smoke-test
+    app.kubernetes.io/managed-by: argocd
+    environment: production
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 600
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: currency-converter
+        app.kubernetes.io/component: smoke-test
+    spec:
+      restartPolicy: Never
+      serviceAccountName: currency-converter-sa
+      initContainers:
+        - name: wait-for-deployment
+          image: bitnami/kubectl:latest
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for deployment to be ready..."
+              kubectl rollout status deployment/currency-converter \
+                -n production --timeout=180s
+              echo "Deployment is ready!"
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "32Mi"
+            limits:
+              cpu: "100m"
+              memory: "64Mi"
+      containers:
+        - name: smoke-test
+          image: curlimages/curl:8.5.0
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              BASE_URL="http://currency-converter-svc.production.svc.cluster.local"
+              PASS=0
+              FAIL=0
+
+              run_test() {
+                local name="$1" url="$2" expected_code="$3" expected_body="$4"
+                echo ""
+                echo "→ Test: $name"
+                RESPONSE=$(curl -s -o /tmp/body -w "%{http_code}" \
+                  --max-time 10 --retry 3 --retry-delay 2 "$url")
+                BODY=$(cat /tmp/body)
+                if [ "$RESPONSE" = "$expected_code" ]; then
+                  if [ -n "$expected_body" ] && ! echo "$BODY" | grep -q "$expected_body"; then
+                    echo "  ❌ FAIL — body missing: $expected_body"
+                    FAIL=$((FAIL + 1))
+                  else
+                    echo "  ✅ PASS — HTTP $RESPONSE"
+                    PASS=$((PASS + 1))
+                  fi
+                else
+                  echo "  ❌ FAIL — expected $expected_code got $RESPONSE"
+                  FAIL=$((FAIL + 1))
+                fi
+              }
+
+              echo "=============================="
+              echo " Smoke Tests — $(date -u)"
+              echo "=============================="
+              run_test "Health Check"    "$BASE_URL/healthz"                                          "200" "ok"
+              run_test "Readiness"       "$BASE_URL/readyz"                                           "200" "ready"
+              run_test "Home Page"       "$BASE_URL/"                                                 "200" ""
+              run_test "API Status"      "$BASE_URL/api/v1/status"                                    "200" "status"
+              run_test "Convert USD-EGP" "$BASE_URL/api/v1/convert?from=USD&to=EGP&amount=100"        "200" "result"
+              run_test "Rates"           "$BASE_URL/api/v1/rates"                                     "200" "rates"
+              run_test "No Admin"        "$BASE_URL/admin"                                            "404" ""
+              echo ""
+              echo "=============================="
+              echo " Results: ✅ $PASS passed | ❌ $FAIL failed"
+              echo "=============================="
+              [ "$FAIL" -gt "0" ] && exit 1
+              echo "All smoke tests passed!"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "32Mi"
+            limits:
+              cpu: "100m"
+              memory: "64Mi"
