@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loki
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: loki
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: loki
+    spec:
+      containers:
+        - name: loki
+          image: grafana/loki:3.1.1
+          args:
+            - -config.file=/etc/loki/local-config.yaml
+          ports:
+            - containerPort: 3100
+              name: http
+
+# ------------------------------------------------------------------
+# Loki stores Kubernetes logs centrally.
+#
+# Instead of:
+#   kubectl logs pod-name
+#
+# You search logs centrally inside Grafana.
+#
+# Example:
+#   {app="currency-converter"} |= "error"
+#
+# This enables:
+#   - debugging
+#   - production incident analysis
+#   - log aggregation
+# ------------------------------------------------------------------

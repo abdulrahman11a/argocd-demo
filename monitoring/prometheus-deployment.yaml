@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: prometheus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prometheus
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.54.1
+          ports:
+            - containerPort: 9090
+              name: http
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+            - name: storage
+              mountPath: /prometheus
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-config
+
+        - name: storage
+          emptyDir: {}
+
+# ------------------------------------------------------------------
+# Prometheus stores:
+#   - metrics
+#   - time-series data
+#   - HTTP request counters
+#   - latency histograms
+#
+# Argo Rollouts queries Prometheus during Canary analysis.
+#
+# Example:
+#   "Is error rate > 1%?"
+#   "Is P99 latency < 500ms?"
+#
+# Prometheus becomes the automated decision engine.
+# ------------------------------------------------------------------
