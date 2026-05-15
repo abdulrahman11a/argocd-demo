@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: currency-converter-svc
+  namespace: production
+  labels:
+    app.kubernetes.io/name: currency-converter
+    environment: production
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: currency-converter
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+
+# ------------------------------------------------------------------
+# Rolling Update needs only ONE service (unlike Blue-Green/Canary).
+#
+# During a rolling update, BOTH old and new pods are behind the
+# same service simultaneously. The service load-balances between
+# old pods (still running) and new pods (starting up).
+#
+# This means a user request might hit old OR new version during
+# the transition. For stateless apps this is acceptable.
+#
+# If your app has breaking API changes between versions,
+# use Blue-Green (instant switch) instead.
+#
+# Readiness probes ensure a pod only receives traffic after it
+# passes all health checks — preventing requests going to a pod
+# that is still initializing.
+# ------------------------------------------------------------------

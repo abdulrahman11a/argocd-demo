@@ -1,0 +1,179 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: currency-converter
+  namespace: production
+  labels:
+    app.kubernetes.io/name: currency-converter
+    app.kubernetes.io/managed-by: argocd
+    environment: production
+    strategy: canary
+spec:
+  replicas: 10
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: currency-converter
+  strategy:
+    canary:
+      canaryService: currency-converter-canary
+      stableService: currency-converter-stable
+      trafficRouting:
+        nginx:
+          stableIngress: currency-converter-stable-ingress
+      steps:
+        - setWeight: 5
+        - analysis:
+            templates:
+              - templateName: canary-success-rate
+            args:
+              - name: service-name
+                value: currency-converter-canary
+        - pause:
+            duration: 10m
+        - setWeight: 25
+        - analysis:
+            templates:
+              - templateName: canary-success-rate
+            args:
+              - name: service-name
+                value: currency-converter-canary
+        - pause:
+            duration: 15m
+        - setWeight: 50
+        - pause: {}
+        - setWeight: 75
+        - analysis:
+            templates:
+              - templateName: canary-success-rate
+              - templateName: canary-latency
+            args:
+              - name: service-name
+                value: currency-converter-canary
+        - pause:
+            duration: 10m
+        - setWeight: 100
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: currency-converter
+        environment: production
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: currency-converter-sa
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: currency-converter
+      containers:
+        - name: currency-converter
+          image: abdulrahman11a/currency-converter:IMAGE_TAG
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 5000
+            - name: metrics
+              containerPort: 9090
+          envFrom:
+            - configMapRef:
+                name: currency-converter-config
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: currency-converter-secret
+                  key: db-password
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: currency-converter-secret
+                  key: api-key
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: cache
+              mountPath: /app/cache
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: cache
+          emptyDir: {}
+      securityContext:
+        fsGroup: 1000
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+
+# ------------------------------------------------------------------
+# Canary Rollout — USE CASE
+#
+# Perfect for: high-traffic production where you need real user
+# validation with automatic metric-driven promotion/rollback.
+#
+# Steps breakdown:
+#   5%  → tiny blast radius. catastrophic bugs caught with minimal impact.
+#   25% → statistically valid metrics from real production traffic.
+#   50% → MANUAL GATE (pause: {}) — human approval required to continue.
+#   75% → final metric validation (success rate + P99 latency).
+#  100% → full promotion. stable ReplicaSet scales down.
+#
+# pause: {} (indefinite) at 50%:
+#   Rollout pauses forever until you run:
+#   kubectl argo rollouts promote currency-converter -n production
+#   This gives you a human decision point at the halfway mark.
+#
+# Automatic rollback triggers when:
+#   - HTTP success rate < 95% for 2 consecutive Prometheus checks
+#   - Error rate > 1%
+#   - P99 latency > 500ms at the 75% step
+# ------------------------------------------------------------------

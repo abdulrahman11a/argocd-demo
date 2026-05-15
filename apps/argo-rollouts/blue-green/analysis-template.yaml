@@ -1,0 +1,98 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: currency-converter-readiness
+  namespace: production
+spec:
+  args:
+    - name: service-name
+  metrics:
+    - name: readiness-check
+      count: 3
+      interval: 20s
+      successCondition: result == "200"
+      failureLimit: 1
+      provider:
+        job:
+          spec:
+            backoffLimit: 0
+            template:
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: readiness-check
+                    image: curlimages/curl:8.5.0
+                    command:
+                      - sh
+                      - -c
+                      - |
+                        STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+                          --max-time 5 \
+                          http://{{args.service-name}}.production.svc.cluster.local/readyz)
+                        echo $STATUS
+                        [ "$STATUS" = "200" ]
+
+# ------------------------------------------------------------------
+# AnalysisTemplate (readiness) — runs BEFORE promotion (prePromotionAnalysis).
+#
+# Runs a curl Job inside the cluster 3 times every 20 seconds.
+# If the preview service returns HTTP 200 all 3 times → PASS → promote.
+# If it fails even once (failureLimit: 1) → FAIL → promotion blocked.
+#
+# Why a Job instead of Prometheus here?
+# - Simpler: no metrics pipeline needed for basic readiness check
+# - Tests actual HTTP response, not just a Prometheus counter
+# - Works in minimal clusters without observability stack
+# ------------------------------------------------------------------
+
+---
+
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: currency-converter-success-rate
+  namespace: production
+spec:
+  args:
+    - name: service-name
+  metrics:
+    - name: http-success-rate
+      interval: 2m
+      count: 5
+      successCondition: result[0] >= 0.95
+      failureLimit: 2
+      provider:
+        prometheus:
+          address: http://prometheus.monitoring.svc.cluster.local:9090
+          query: |
+            sum(rate(http_requests_total{service="{{args.service-name}}",status!~"5..",namespace="production"}[2m]))
+            /
+            sum(rate(http_requests_total{service="{{args.service-name}}",namespace="production"}[2m]))
+
+    - name: p99-latency
+      interval: 2m
+      count: 5
+      successCondition: result[0] <= 0.5
+      failureLimit: 2
+      provider:
+        prometheus:
+          address: http://prometheus.monitoring.svc.cluster.local:9090
+          query: |
+            histogram_quantile(0.99,
+              sum(rate(http_request_duration_seconds_bucket{service="{{args.service-name}}",namespace="production"}[2m])) by (le)
+            )
+
+# ------------------------------------------------------------------
+# AnalysisTemplate (success-rate) — runs AFTER promotion (postPromotionAnalysis).
+#
+# Queries Prometheus every 2 minutes, 5 times total (10 min window).
+#
+# Metric 1 — http-success-rate:
+#   Ratio of non-5xx to total requests. Must stay >= 95%.
+#   If error rate exceeds 5% for 2 consecutive checks → auto rollback.
+#
+# Metric 2 — p99-latency:
+#   99th percentile response time. Must stay <= 500ms.
+#   Catches performance regressions that don't appear in error rates.
+#   Example: a DB query that makes responses 3x slower but still 200 OK.
+# ------------------------------------------------------------------

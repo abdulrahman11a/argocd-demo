@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: production
+  labels:
+    app.kubernetes.io/managed-by: argocd
+    environment: production
+    team: platform
+
+# ------------------------------------------------------------------
+# Namespace is the logical boundary for all resources of this app.
+# The label "environment: production" is used by:
+# - AppProject destinations to restrict where ArgoCD can deploy
+# - Prometheus for metric scraping with environment label
+# ------------------------------------------------------------------

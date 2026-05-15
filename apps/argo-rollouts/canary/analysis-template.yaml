@@ -1,0 +1,84 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: canary-success-rate
+  namespace: production
+spec:
+  args:
+    - name: service-name
+  metrics:
+    - name: http-success-rate
+      interval: 2m
+      count: 3
+      successCondition: result[0] >= 0.95
+      failureLimit: 1
+      provider:
+        prometheus:
+          address: http://prometheus.monitoring.svc.cluster.local:9090
+          query: |
+            sum(rate(http_requests_total{service="{{args.service-name}}",status!~"5..",namespace="production"}[2m]))
+            /
+            sum(rate(http_requests_total{service="{{args.service-name}}",namespace="production"}[2m]))
+
+    - name: error-rate
+      interval: 2m
+      count: 3
+      successCondition: result[0] <= 0.01
+      failureLimit: 1
+      provider:
+        prometheus:
+          address: http://prometheus.monitoring.svc.cluster.local:9090
+          query: |
+            sum(rate(http_requests_total{service="{{args.service-name}}",status=~"5..",namespace="production"}[2m]))
+            /
+            sum(rate(http_requests_total{service="{{args.service-name}}",namespace="production"}[2m]))
+
+# ------------------------------------------------------------------
+# AnalysisTemplate — the automated gate between canary steps.
+#
+# How it works at each step (e.g. setWeight 5%):
+#   1. Argo Rollouts creates an AnalysisRun from this template
+#   2. AnalysisRun queries Prometheus every 2 minutes
+#   3. Runs 3 times (6 minute window per step)
+#   4. If failureLimit(1) exceeded → AnalysisRun = Failed
+#   5. Failed AnalysisRun → Rollout aborts → traffic returns to stable
+#
+# http-success-rate: ratio of non-5xx to total. Must stay >= 95%.
+# error-rate: direct 5xx fraction. Must stay <= 1%.
+# ------------------------------------------------------------------
+
+---
+
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: canary-latency
+  namespace: production
+spec:
+  args:
+    - name: service-name
+  metrics:
+    - name: p99-latency
+      interval: 2m
+      count: 3
+      successCondition: result[0] <= 0.5
+      failureLimit: 1
+      provider:
+        prometheus:
+          address: http://prometheus.monitoring.svc.cluster.local:9090
+          query: |
+            histogram_quantile(0.99,
+              sum(rate(http_request_duration_seconds_bucket{service="{{args.service-name}}",namespace="production"}[2m])) by (le)
+            )
+
+# ------------------------------------------------------------------
+# P99 Latency Template — used at the 75% step before full promotion.
+#
+# P99 = 99th percentile response time.
+# successCondition: result[0] <= 0.5 means P99 must be under 500ms.
+#
+# Why P99 and not average?
+# - Average hides outliers (a few very slow requests skew it)
+# - P99 represents the slowest 1% of your users
+# - In production with 1M requests/day, 1% = 10,000 slow responses
+# ------------------------------------------------------------------

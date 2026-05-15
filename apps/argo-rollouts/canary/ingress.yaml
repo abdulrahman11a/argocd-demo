@@ -1,0 +1,42 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: currency-converter-stable-ingress
+  namespace: production
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - currency-converter.example.com
+      secretName: currency-converter-tls
+  rules:
+    - host: currency-converter.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: currency-converter-stable
+                port:
+                  name: http
+
+# ------------------------------------------------------------------
+# STABLE INGRESS — the primary ingress. Argo Rollouts automatically
+# creates a CANARY INGRESS as a copy and adds:
+#   nginx.ingress.kubernetes.io/canary: "true"
+#   nginx.ingress.kubernetes.io/canary-weight: "5"  → then 25, 50...
+#
+# NGINX then routes:
+#   95% → stable ingress → stable service → stable pods
+#    5% → canary ingress → canary service → canary pods
+#
+# This is TRUE weighted routing at Layer 7.
+# Do NOT manually create the canary ingress — Argo owns it.
+# ------------------------------------------------------------------

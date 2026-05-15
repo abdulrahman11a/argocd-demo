@@ -1,0 +1,68 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: currency-converter-active
+  namespace: production
+  labels:
+    app.kubernetes.io/name: currency-converter
+    app.kubernetes.io/component: service-active
+    environment: production
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: currency-converter
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+
+# ------------------------------------------------------------------
+# ACTIVE SERVICE — carries 100% of live production traffic (Blue).
+#
+# Argo Rollouts manages the selector of this service automatically:
+#   Before promotion → selector points to Blue pods (old version)
+#   After  promotion → selector switches to Green pods (new version)
+#
+# The switch is INSTANT — no gradual traffic shifting.
+# This service is what your Ingress always points to.
+# NEVER manually edit the selector — Argo Rollouts owns it.
+# ------------------------------------------------------------------
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: currency-converter-preview
+  namespace: production
+  labels:
+    app.kubernetes.io/name: currency-converter
+    app.kubernetes.io/component: service-preview
+    environment: production
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: currency-converter
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+
+# ------------------------------------------------------------------
+# PREVIEW SERVICE — points to the NEW (Green) version only.
+#
+# Use cases for the preview service:
+#   - QA team runs manual functional testing against it
+#   - Automated smoke tests hit this service internally
+#   - prePromotionAnalysis queries metrics from these pods
+#   - Load testing in isolation before touching production traffic
+#
+# Regular users NEVER hit this service.
+# It is only accessible internally within the cluster.
+# ------------------------------------------------------------------

@@ -1,0 +1,32 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: production
+
+resources:
+  - ../shared/namespace.yaml
+  - ../shared/serviceaccount.yaml
+  - analysis-template.yaml
+  - services.yaml
+  - rollout.yaml
+  - ingress.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: currency-converter
+  strategy: blue-green
+
+images:
+  - name: abdulrahman11a/currency-converter
+    newTag: "IMAGE_TAG"
+
+# ------------------------------------------------------------------
+# Resource order matters:
+#   AnalysisTemplates and Services must exist BEFORE the Rollout,
+#   because the Rollout spec references them by name.
+#
+# To trigger a new rollout from CI:
+#   kustomize edit set image abdulrahman11a/currency-converter:v2.0.1
+#   git commit -am "ci: update image to v2.0.1"
+#   git push
+#   Argo CD detects the change → triggers the Rollout automatically.
+# ------------------------------------------------------------------

@@ -1,0 +1,61 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: currency-converter-stable
+  namespace: production
+  labels:
+    app.kubernetes.io/name: currency-converter
+    app.kubernetes.io/component: service-stable
+    environment: production
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: currency-converter
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+
+# ------------------------------------------------------------------
+# STABLE SERVICE — points to the old (stable) version pods.
+# Argo Rollouts manages its selector automatically.
+# At start of rollout: receives 95% of traffic (when canary = 5%).
+# After full promotion: receives 0% then old pods scale down.
+# ------------------------------------------------------------------
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: currency-converter-canary
+  namespace: production
+  labels:
+    app.kubernetes.io/name: currency-converter
+    app.kubernetes.io/component: service-canary
+    environment: production
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: currency-converter
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+
+# ------------------------------------------------------------------
+# CANARY SERVICE — points to the new (canary) version pods.
+# Argo Rollouts patches the NGINX Ingress annotation automatically:
+#   nginx.ingress.kubernetes.io/canary: "true"
+#   nginx.ingress.kubernetes.io/canary-weight: "5"
+#
+# This is REAL weighted routing at the load balancer level,
+# not just replica count tricks. With 10 replicas, setWeight(5)
+# means 5% of ALL traffic → canary, regardless of pod count.
+# ------------------------------------------------------------------

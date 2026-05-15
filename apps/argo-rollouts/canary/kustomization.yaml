@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: production
+
+resources:
+  - ../shared/namespace.yaml
+  - ../shared/serviceaccount.yaml
+  - analysis-template.yaml
+  - services.yaml
+  - ingress.yaml
+  - rollout.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: currency-converter
+  strategy: canary
+
+images:
+  - name: abdulrahman11a/currency-converter
+    newTag: "IMAGE_TAG"
